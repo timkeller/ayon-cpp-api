@@ -143,7 +143,11 @@ AyonApi::AyonApi(const std::optional<std::string> &logFilePos,
     
     AyonLogger& loggerRef = AyonLogger::getInstance();
     
-    if (!logPath.empty()) {
+    // Only enable file logging when a real file path was configured. An empty
+    // AYONLOGGERFILEPOS resolves to $TMPDIR (a directory) above; initializing
+    // the async file logger on that both fails and, on macOS, leaves spdlog's
+    // thread pool to abort at static destruction ("mutex lock failed").
+    if (!logPath.empty() && !std::filesystem::is_directory(logPath)) {
         loggerRef.initFileLogger(logPath.string());
     }
 
@@ -192,9 +196,15 @@ AyonApi::AyonApi(const std::optional<std::string> &logFilePos,
         m_log->info(m_log->key("AyonApi"), "Status code: {}", res->status);
 
         m_headers = {
-            {"X-Api-Key", m_authKey},
-            {"X-ayon-site-id", m_siteId}
+            {"X-Api-Key", m_authKey}
         };
+        // Only advertise a site id when we actually have one. A service-account
+        // setup (or any machine without a registered AYON site) has no valid
+        // site, and the server returns 400 "Invalid site id" if the header is
+        // present but empty/unknown. Omitting it lets resolution proceed.
+        if (!m_siteId.empty()) {
+            m_headers.emplace("X-ayon-site-id", m_siteId);
+        }
 
         auto resMe = m_ayonServer->Get("/api/users/me", m_headers);
         if (resMe && resMe->status != 200) {
@@ -218,6 +228,8 @@ AyonApi::getSiteRoots() {
             std::string platform;
             #ifdef _WIN32
                 platform = "windows";
+            #elif __APPLE__
+                platform = "darwin";
             #elif __linux__
                 platform = "linux";
             #endif
