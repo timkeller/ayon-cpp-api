@@ -153,6 +153,10 @@ AyonApi::AyonApi(const std::optional<std::string> &logFilePos,
     m_log->info(m_log->key("AyonApi"), "Init AyonServer httplib::Client");
     
     m_ayonServer = std::make_unique<httplib::Client>(m_serverUrl);
+    // Reuse the TCP/TLS connection across resolves instead of a fresh handshake per
+    // request. Over a WAN link the handshake dominates per-call latency, so this is
+    // a large win for the serial resolve path and the prewarm batched resolves.
+    m_ayonServer->set_keep_alive(true);
     m_log->info(m_log->key("AyonApi"), "After creating httplib::Client - {}", m_serverUrl);
 
     if (isSSL()) {
@@ -544,6 +548,54 @@ AyonApi::batchResolvePath(std::vector<std::string> &uriPaths) {
         for (const auto &assetRaw: future.get()) {
             assetIdentGrp.emplace(getAssetIdent(assetRaw));
         }
+    }
+
+    return assetIdentGrp;
+};
+
+std::unordered_map<std::string, std::string>
+AyonApi::batchResolvePathSerial(const std::vector<std::string> &uriPaths) {
+    PerfTimer("AyonApi::batchResolvePathSerial");
+    m_log->info(m_log->key("AyonApi"), "AyonApi::batchResolvePathSerial({} uris)", uriPaths.size());
+
+    std::unordered_map<std::string, std::string> assetIdentGrp;
+    if (uriPaths.empty()) {
+        return assetIdentGrp;
+    }
+
+    nlohmann::json uriArray = nlohmann::json::array();
+    for (const auto &uri: uriPaths) {
+        if (!uri.empty()) {
+            uriArray.push_back(uri);
+        }
+    }
+    if (uriArray.empty()) {
+        return assetIdentGrp;
+    }
+
+    const std::string endPoint
+        = m_pathOnlyResolution ? m_uriResolverEndpoint + m_uriResolverEndpointPathOnlyVar : m_uriResolverEndpoint;
+    nlohmann::json jsonPayload = {{"resolveRoots", false}, {"uris", uriArray}};
+    std::string payload = jsonPayload.dump();
+
+    std::string rawResponse;
+    {
+        std::lock_guard<std::mutex> lock(m_ayonServerMutex);
+        rawResponse = serialCorePost(endPoint, m_headers, payload, 200);
+    }
+    if (rawResponse.empty()) {
+        m_log->warn("AyonApi::batchResolvePathSerial empty response");
+        return assetIdentGrp;
+    }
+
+    try {
+        nlohmann::json responseArray = nlohmann::json::parse(rawResponse);
+        for (const auto &assetRaw: responseArray) {
+            assetIdentGrp.emplace(getAssetIdent(assetRaw));
+        }
+    }
+    catch (const nlohmann::json::exception &e) {
+        m_log->error("AyonApi::batchResolvePathSerial JSON parse failed: {}", e.what());
     }
 
     return assetIdentGrp;

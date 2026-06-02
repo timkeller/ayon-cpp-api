@@ -111,6 +111,21 @@ class AyonApi {
         std::unordered_map<std::string, std::string> batchResolvePath(std::vector<std::string> &uriPaths);
 
         /**
+         * @brief Resolves a vector of paths in a SINGLE batched request over the persistent
+         * keep-alive client.
+         *
+         * Unlike batchResolvePath (which fans out parallel requests on fresh, non-keep-alive
+         * clients), this sends one POST with all URIs through m_ayonServer and parses the whole
+         * response array. One round-trip, deterministic, connection reused. Intended for the
+         * prewarm pass where frontiers are modest and determinism + keep-alive matter more than
+         * request-level parallelism.
+         *
+         * @param uriPaths The vector of URI paths to resolve.
+         * @return An unordered map of URI -> resolved path.
+         */
+        std::unordered_map<std::string, std::string> batchResolvePathSerial(const std::vector<std::string> &uriPaths);
+
+        /**
          * @brief Takes an AYON path URI response (resolved ayon://path) and returns a pair of
          * asset identifier (ayon:// path) and the machine local file location.
          *
