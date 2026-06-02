@@ -21,6 +21,12 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 
 if(WIN32)
   set(OPENSSL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/opensslW")
+elseif(APPLE)
+  # macOS: no vendored darwin OpenSSL blob; use Homebrew openssl@3.
+  # Honour a caller-provided OPENSSL_ROOT_DIR if one was passed in.
+  if(NOT OPENSSL_ROOT_DIR)
+    set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl@3")
+  endif()
 else()
   set(OPENSSL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/opensslL")
   # find_package(OpenSSL REQUIRED)
