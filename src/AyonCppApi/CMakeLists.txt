@@ -4,6 +4,11 @@ if(USE_OPENSSL3)
     message(STATUS " [AyonCppApi] OpenSSL Mode: v3 (Houdini 21 / Maya 2025)")
     if(WIN32)
         set(OPENSSL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../ext/opensslW")
+    elseif(APPLE)
+        # macOS: no vendored darwin blob; use Homebrew openssl@3 (honour override)
+        if(NOT OPENSSL_ROOT_DIR)
+            set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl@3")
+        endif()
     else()
         set(OPENSSL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../ext/openssl3L")
     endif()
@@ -36,17 +41,22 @@ target_compile_definitions(AyonCppApi PUBLIC CPPHTTPLIB_OPENSSL_SUPPORT)
 
 # Link against the specific OpenSSL version selected above
 if(WIN32)
-  target_link_libraries(AyonCppApi PRIVATE 
+  target_link_libraries(AyonCppApi PRIVATE
     ${OPENSSL_ROOT_DIR}/lib/libcrypto_static.lib
     ${OPENSSL_ROOT_DIR}/lib/libssl_static.lib
   )
+elseif(APPLE)
+  # macOS: link Homebrew's OpenSSL via imported targets (the vendored *.a are
+  # Linux ELF archives). No -ldl on macOS; libdl is part of libSystem.
+  find_package(OpenSSL REQUIRED)
+  target_link_libraries(AyonCppApi PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 else()
   # Standard Linux linking using the root dir we defined at the top
   target_link_libraries(AyonCppApi PRIVATE
     ${OPENSSL_ROOT_DIR}/lib/libssl.a
     ${OPENSSL_ROOT_DIR}/lib/libcrypto.a
     ${OPENSSL_ROOT_DIR}/lib/libssl.a   # Sometimes repeated for circular dep resolution
-    ${OPENSSL_ROOT_DIR}/lib/libcrypto.a 
+    ${OPENSSL_ROOT_DIR}/lib/libcrypto.a
     dl # OpenSSL often needs dynamic loader on Linux
     pthread # OpenSSL often needs threads
   )
